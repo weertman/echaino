@@ -1,0 +1,15 @@
+numpy
+opencv-python
+scipy
+shapely
+torch
+segment-anything
+pyyaml
+ultralytics
+sahi
+pandas
+PyQt6
+matplotlib
+seaborn
+pillow
+statsmodels
