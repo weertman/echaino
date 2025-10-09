@@ -1,0 +1,74 @@
+sam:
+  checkpoint: sam_vit_h_4b8939.pth
+  model_type: vit_h
+  device: cuda
+  use_multimask: false
+  min_mask_area: 1
+  strict_clip: true
+yolo:
+  model: yolov8n.pt
+  imgsz: 640
+  conf: 0.25
+  iou: 0.45
+  device: cuda
+  sahi_batch_size: 16
+  models_dir: ./models/
+  train_epochs: 250
+  batch_size: 16
+  img_size: 640
+  train_val_split: 0.8
+  min_clip_area: 10
+  pretrained_model: yolo11l-seg.pt
+  dataset_output_dir: ./yolo_datasets/
+image:
+  scale_factor: 1.0
+  dpi: 300
+archive:
+  root_dir: ./archive
+  subfolder_format: '{timestamp}_{image_name}'
+  auto_save_interval_sec: 600
+tiling:
+  base_tile_size: 640
+  overlap_ratio: 0.2
+sahi:
+  slice_size: 640
+  overlap_ratio: 0.2
+  postprocess_match_threshold: 0.5
+ui:
+  box_color:
+  - 255
+  - 0
+  - 0
+  box_width: 2
+  class_colors:
+  - - 255
+    - 0
+    - 0
+  - - 0
+    - 255
+    - 0
+  - - 255
+    - 0
+    - 0
+  segmentation_alpha: 0.3
+  segmentation_colors: random
+  canvas_max_size:
+  - 2048
+  - 2048
+processing:
+  batch_size: 4
+  enable_deduplication: false
+  enable_merge_partials: true
+  keep_full_masks: false
+export:
+  include_confidence: true
+  include_source: true
+  csv_delimiter: ','
+  coco_category_name: urchin
+  coco_category_id: 1
+classes:
+- urchin
+- larvae
+- diatom
+debug: false
+default_scale_px_per_cm: 472.54
