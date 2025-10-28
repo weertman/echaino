@@ -1,5 +1,5 @@
 # FILE: utils\visualization_utils.py
-# PATH: D:\urchinScanner\utils\visualization_utils.py
+# PATH: D:\\echaino\\utils\visualization_utils.py
 
 import os
 import logging
@@ -116,12 +116,13 @@ def generate_report(df: pd.DataFrame, save_dir: str, options: Optional[Dict] = N
         options = {
             'plots': [
                 'violin_area_um2',
-                'violin_diameter_um',  # Explicitly include diameter visualization
+                'violin_diameter_best_fit_um',  # keep
+                'violin_diameter_feret_max_um',  # keep
                 'facet_histogram_perimeter_um',
                 'scatter_area_vs_perimeter_um',
                 'pairplot_key_metrics'
             ],
-            'sample_size': 1000  # Sample for large DFs to avoid clutter
+            'sample_size': 1000
         }
 
     # Set seaborn style for simplicity and accessibility (minimal chartjunk, colorblind palette)
@@ -153,8 +154,8 @@ def generate_report(df: pd.DataFrame, save_dir: str, options: Optional[Dict] = N
         logger.info(f"Dropped pixel-based columns: {pixel_cols}")
 
     # Remove extreme outliers
-    #columns_to_check = [col for col in ['area_um2', 'perimeter_um', 'diameter_um'] if col in df.columns]
-    columns_to_check = [col for col in ['diameter_um'] if col in df.columns]
+    columns_to_check = [c for c in ['diameter_best_fit_um','diameter_feret_max_um'] if c in df.columns]
+
     multiplier = 3.0
     if columns_to_check:
         logger.info(f"Performing IQR outlier filtering with multiplier={multiplier} on columns: {columns_to_check}")
@@ -192,8 +193,12 @@ def generate_report(df: pd.DataFrame, save_dir: str, options: Optional[Dict] = N
         summary_lines.append(per_class_desc)
 
     # Add correlations if relevant µm columns exist
-    metric_cols = [col for col in ['area_um2', 'perimeter_um', 'diameter_um', 'confidence'] if
-                   col in filtered_df.columns]  # Include diameter_um
+    metric_cols = [col for col in [
+        'area_um2', 'perimeter_um',
+        'diameter_best_fit_um', 'diameter_feret_max_um',
+        'confidence'
+    ] if col in filtered_df.columns]
+
     if len(metric_cols) >= 2:
         correlation = filtered_df[metric_cols].corr().to_string()
         summary_lines.append("\nCorrelations Between Key µm Metrics:")
@@ -290,6 +295,36 @@ def generate_report(df: pd.DataFrame, save_dir: str, options: Optional[Dict] = N
                     else:
                         logger.warning("Skipping violin_diameter_um: 'diameter_um' column missing or empty")
                         plt.close(fig)
+                        continue
+
+                elif plot_type == 'violin_diameter_best_fit_um':
+                    col = 'diameter_best_fit_um'
+                    if col in plot_df.columns and not plot_df[col].dropna().empty:
+                        sns.violinplot(data=plot_df, y=col, ax=ax, hue=hue, inner='quartile')
+                        ax.set_title('Violin Plot of Diameter (best-fit circle, µm)')
+                        ax.set_ylabel('Diameter (best-fit, µm)')
+                        ax.set_ylim(0, plot_df[col].max() * 1.05)
+                        mean_val = plot_df[col].mean()
+                        ax.axhline(mean_val, color='red', linestyle='--', label=f'Mean: {mean_val:.2f} µm')
+                        ax.legend()
+                    else:
+                        logger.warning("Skipping violin_diameter_best_fit_um: column missing or empty")
+                        plt.close(fig);
+                        continue
+
+                elif plot_type == 'violin_diameter_feret_max_um':
+                    col = 'diameter_feret_max_um'
+                    if col in plot_df.columns and not plot_df[col].dropna().empty:
+                        sns.violinplot(data=plot_df, y=col, ax=ax, hue=hue, inner='quartile')
+                        ax.set_title('Violin Plot of Diameter (Feret max, tip-to-tip, µm)')
+                        ax.set_ylabel('Diameter (Feret max, µm)')
+                        ax.set_ylim(0, plot_df[col].max() * 1.05)
+                        mean_val = plot_df[col].mean()
+                        ax.axhline(mean_val, color='red', linestyle='--', label=f'Mean: {mean_val:.2f} µm')
+                        ax.legend()
+                    else:
+                        logger.warning("Skipping violin_diameter_feret_max_um: column missing or empty")
+                        plt.close(fig);
                         continue
 
                 elif plot_type == 'facet_histogram_perimeter_um':

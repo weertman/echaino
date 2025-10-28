@@ -1,5 +1,5 @@
 # FILE: ui\image_canvas.py
-# PATH: D:\urchinScanner\ui\image_canvas.py
+# PATH: D:\\echaino\\ui\\image_canvas.py
 
 from PyQt6.QtWidgets import QWidget, QMessageBox, QInputDialog, QMenu
 from PyQt6.QtCore import Qt, QPointF, pyqtSignal, QRectF
@@ -81,6 +81,13 @@ class ImageCanvas(QWidget):
         self.drag_mode = None  # New: 'move', 'resize_nw', etc.
         self.setMouseTracking(True)  # New: Enable move events without press
 
+        # ===== SESSION-ONLY view adjustments (non-destructive) =====
+        # Ranges: [-100, 100]
+        # contrast α = 1 + c/100 ; brightness β = b ; saturation S *= 1 + s/100
+        self._brightness = 0
+        self._contrast   = 0
+        self._saturation = 0
+
     def set_annotation_manager(self, annotation_manager):
         """Set or update the annotation manager reference"""
         self.annotation_manager = annotation_manager
@@ -109,6 +116,92 @@ class ImageCanvas(QWidget):
     def _clear_cache(self):
         """Clear rendering cache"""
         self._render_cache.clear()
+
+    # ===== View adjustment API (session-only) =====
+    def set_brightness(self, value: int):
+        """β in [-100, 100]"""
+        try:
+            v = int(value)
+        except Exception:
+            v = 0
+        v = max(-100, min(100, v))
+        if v == self._brightness:
+            return
+        self._brightness = v
+        self._base_image_changed = True
+        self._clear_cache()
+        self.update()
+
+    def set_contrast(self, value: int):
+        """α = 1 + v/100, v in [-100, 100]"""
+        try:
+            v = int(value)
+        except Exception:
+            v = 0
+        v = max(-100, min(100, v))
+        if v == self._contrast:
+            return
+        self._contrast = v
+        self._base_image_changed = True
+        self._clear_cache()
+        self.update()
+
+    def set_saturation(self, value: int):
+        """S *= 1 + v/100, v in [-100, 100]"""
+        try:
+            v = int(value)
+        except Exception:
+            v = 0
+        v = max(-100, min(100, v))
+        if v == self._saturation:
+            return
+        self._saturation = v
+        self._base_image_changed = True
+        self._clear_cache()
+        self.update()
+
+    def reset_image_adjustments(self):
+        changed = (self._brightness != 0) or (self._contrast != 0) or (self._saturation != 0)
+        self._brightness = 0
+        self._contrast   = 0
+        self._saturation = 0
+        if changed:
+            self._base_image_changed = True
+            self._clear_cache()
+            self.update()
+
+    def _apply_image_adjustments(self, tile_image: np.ndarray) -> np.ndarray:
+        """Apply session-only brightness/contrast/saturation to the tile."""
+        if tile_image is None:
+            return tile_image
+        if self._brightness == 0 and self._contrast == 0 and self._saturation == 0:
+            return tile_image
+
+        img = tile_image
+
+        # Brightness/Contrast (fast path for uint8)
+        if self._brightness != 0 or self._contrast != 0:
+            alpha = max(0.0, 1.0 + (self._contrast / 100.0))  # 0..2
+            beta  = float(self._brightness)                   # -100..+100
+            try:
+                img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
+            except Exception:
+                img = np.clip(alpha * img.astype(np.float32) + beta, 0, 255).astype(np.uint8)
+
+        # Saturation (RGB only)
+        if self._saturation != 0 and img.ndim == 3 and img.shape[2] >= 3:
+            sat_scale = max(0.0, 1.0 + (self._saturation / 100.0))
+            try:
+                hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+                h, s, v = cv2.split(hsv)
+                s = (s.astype(np.float32) * sat_scale).clip(0, 255).astype(np.uint8)
+                hsv = cv2.merge([h, s, v])
+                img = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+            except Exception:
+                # If conversion fails for any reason, keep brightness/contrast result
+                pass
+
+        return img
 
     def _get_visible_tiles(self) -> List[Tuple[int, int]]:
         """Get list of visible tile indices"""
@@ -156,6 +249,9 @@ class ImageCanvas(QWidget):
             return None
 
         tile_image = self.image[y1:y2, x1:x2].copy()
+
+        # >>> Apply session-only adjustments before creating the QImage
+        tile_image = self._apply_image_adjustments(tile_image)
 
         # Create QImage from tile
         h, w = tile_image.shape[:2]
@@ -256,7 +352,6 @@ class ImageCanvas(QWidget):
             mask_sum = np.sum(seg.mask) if seg.mask is not None else "None"
             logger.debug(
                 f"  Segmentation {i}: box_id={seg.box_id}, area={mask_sum}, has_polygon={len(seg.polygon) > 0}")
-
         self.segmentations = segmentations
         self._segmentations_changed = True
         self._clear_cache()
@@ -298,10 +393,22 @@ class ImageCanvas(QWidget):
 
     def set_edit_mode(self, enabled: bool):
         self.edit_mode = enabled
-        self.update()  # Redraw
+        if enabled:
+            try:
+                self.setFocus(Qt.FocusReason.ShortcutFocusReason)
+            except Exception:
+                self.setFocus()
+        self.update()
 
+    # ------------------------
+    # (All mouse/paint methods unchanged below)
+    # ------------------------
     def mousePressEvent(self, event: QMouseEvent):
         """Handle mouse press"""
+        try:
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
+        except Exception:
+            self.setFocus()
         if event.button() == Qt.MouseButton.LeftButton:
             if self.calibration_mode:
                 # Handle calibration clicks
@@ -779,46 +886,108 @@ class ImageCanvas(QWidget):
         return cv2.pointPolygonTest(pts, point, False) >= 0
 
     def keyPressEvent(self, event):
-        if self.edit_mode and self.selected_box_id is not None and self.annotation_manager:
-            if event.key() == Qt.Key.Key_Delete:
+        """
+        Robust hotkeys in Edit mode:
+          - digits 1..9 set classes 0..8
+          - digit 0 sets class 9 if >=10 classes, else last class
+          - '[' / ']' cycles class on the selected (or under-cursor) box
+          - works with top-row and numpad digits
+        """
+        handled = False
+        if self.edit_mode and self.annotation_manager:
+            if self.selected_box_id is not None and event.key() == Qt.Key.Key_Delete:
                 self.box_deleted.emit(self.selected_box_id)
                 self.selected_box_id = None
                 self.update()
-            elif event.key() == Qt.Key.Key_Z and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                handled = True
+            elif (event.key() == Qt.Key.Key_Z and
+                  (event.modifiers() & Qt.KeyboardModifier.ControlModifier)):
                 self.undo_requested.emit()
-            elif Qt.Key.Key_0 <= event.key() <= Qt.Key.Key_9:  # Number keys for class change
-                key_str = chr(event.key())  # Get '0'-'9'
-                if key_str in '123456789':
-                    new_class_id = int(key_str) - 1  # '1'→0, '2'→1, ..., '9'→8
-                elif key_str == '0':
-                    new_class_id = 9  # '0'→9
-                else:
-                    return  # Invalid
+                handled = True
+            elif event.key() in (Qt.Key.Key_BracketLeft, Qt.Key.Key_BracketRight):
+                box = self._ensure_selection_under_cursor_if_missing()
+                if box:
+                    n = max(1, len(self.annotation_manager.classes))
+                    cur = getattr(box, 'class_id', 0) or 0
+                    delta = -1 if event.key() == Qt.Key.Key_BracketLeft else 1
+                    new_cid = (cur + delta) % n
+                    self._apply_class_id(box, new_cid)
+                    handled = True
+            else:
+                txt = event.text() or ""
+                no_meta = not (event.modifiers() & (Qt.KeyboardModifier.ControlModifier |
+                                                    Qt.KeyboardModifier.AltModifier))
+                if txt.isdigit() and no_meta:
+                    digit = int(txt)
+                    new_cid = self._map_digit_to_class(digit)
+                    box = self._ensure_selection_under_cursor_if_missing()
+                    if box:
+                        self._apply_class_id(box, new_cid)
+                        handled = True
 
-                # Clamp to available classes
-                max_class = len(self.annotation_manager.classes) - 1
-                if new_class_id > max_class:
-                    new_class_id = max_class  # Or warn via tooltip
+        if not handled:
+            super().keyPressEvent(event)
 
-                selected_box = next((b for b in self.annotation_manager.all_boxes if b.id == self.selected_box_id),
-                                    None)
-                if selected_box:
-                    # Execute command (coords unchanged)
-                    command = EditBoxCommand(
-                        self.annotation_manager,
-                        selected_box.id,
-                        selected_box.x1, selected_box.y1, selected_box.x2, selected_box.y2,
-                        new_class_id=new_class_id
-                    )
-                    self.annotation_manager._execute_command(command)
-                    self.update()  # Redraw (color changes)
-                    logger.info(f"Changed box {selected_box.id} to class {new_class_id} via key")
+    def _map_digit_to_class(self, digit: int) -> int:
+        """
+        Map keyboard digit to a class index.
 
-                    # Show visual feedback
-                    from PyQt6.QtWidgets import QToolTip
-                    QToolTip.showText(self.mapToGlobal(self.current_mouse_pos.toPoint()),
-                                      f"Changed to {self.annotation_manager.classes[new_class_id]}")
-        super().keyPressEvent(event)
+        Behavior:
+          - '1'..'9' -> 0..8
+          - '0'      -> 9
+        If the annotation manager has a non-empty classes list, we clamp to its max index.
+        If there are no classes configured, we DO NOT force everything to 0; we keep the
+        natural mapping above (so 3 -> class_id 2, etc.).
+        """
+        # Base mapping independent of classes
+        idx = 9 if digit == 0 else max(0, digit - 1)
+
+        # If classes exist, clamp to last available index; otherwise leave idx as-is
+        try:
+            num = len(self.annotation_manager.classes) if (self.annotation_manager and
+                                                           hasattr(self.annotation_manager, 'classes')) else 0
+        except Exception:
+            num = 0
+
+        if num > 0:
+            idx = min(idx, num - 1)
+
+        return idx
+
+    def _ensure_selection_under_cursor_if_missing(self):
+        selected_box = None
+        if self.selected_box_id is not None:
+            selected_box = next((b for b in self.annotation_manager.all_boxes if b.id == self.selected_box_id), None)
+        if selected_box is None and self.annotation_manager:
+            img_pos = self.widget_to_image(self.current_mouse_pos)
+            cands = [b for b in self.annotation_manager.all_boxes
+                     if b.x1 <= img_pos[0] <= b.x2 and b.y1 <= img_pos[1] <= b.y2]
+            if cands:
+                cands.sort(key=lambda b: (b.x2 - b.x1) * (b.y2 - b.y1))
+                selected_box = cands[0]
+                self.selected_box_id = selected_box.id
+        return selected_box
+
+    def _apply_class_id(self, box, new_class_id: int):
+        try:
+            command = EditBoxCommand(
+                self.annotation_manager,
+                box.id,
+                box.x1, box.y1, box.x2, box.y2,
+                new_class_id=new_class_id
+            )
+            self.annotation_manager._execute_command(command)
+            self.update()
+            logger.info(f"Changed box {box.id} to class {new_class_id} via hotkey")
+            from PyQt6.QtWidgets import QToolTip
+            name = (self.annotation_manager.classes[new_class_id]
+                    if hasattr(self.annotation_manager, 'classes') and new_class_id < len(
+                self.annotation_manager.classes)
+                    else str(new_class_id))
+            QToolTip.showText(self.mapToGlobal(self.current_mouse_pos.toPoint()),
+                              f"Changed to {name}")
+        except Exception as e:
+            logger.error(f"Failed to apply class {new_class_id} to box {getattr(box, 'id', '?')}: {e}")
 
     def contextMenuEvent(self, event):
         if self.edit_mode and self.selected_box_id is not None and self.annotation_manager:

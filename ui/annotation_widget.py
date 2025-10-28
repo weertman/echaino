@@ -1,5 +1,5 @@
 # FILE: ui\annotation_widget.py
-# PATH: D:\urchinScanner\ui\annotation_widget.py
+# PATH: D:\\echaino\\ui\annotation_widget.py
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QComboBox, QLabel
 from PyQt6.QtCore import pyqtSignal

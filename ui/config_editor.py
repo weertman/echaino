@@ -1,5 +1,5 @@
 # FILE: ui\config_editor.py
-# PATH: D:\urchinScanner\ui\config_editor.py
+# PATH: D:\\echaino\\ui\config_editor.py
 
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox, QGroupBox, QPushButton, QScrollArea, QWidget, QMessageBox
 from PyQt6.QtCore import Qt

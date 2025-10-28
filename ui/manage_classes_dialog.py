@@ -1,5 +1,5 @@
 # FILE: ui\manage_classes_dialog.py
-# PATH: D:\urchinScanner\ui\manage_classes_dialog.py
+# PATH: D:\\echaino\\ui\manage_classes_dialog.py
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,

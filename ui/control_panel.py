@@ -1,11 +1,11 @@
 # FILE: ui\control_panel.py
-# PATH: D:\urchinScanner\ui\control_panel.py
+# PATH: D:\\echaino\\ui\\control_panel.py
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox, QCheckBox, QComboBox,
-    QLineEdit, QHBoxLayout, QFileDialog, QMessageBox
+    QLineEdit, QHBoxLayout, QFileDialog, QMessageBox, QSlider
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
 import os
 import random
@@ -107,6 +107,12 @@ class ControlPanel(QWidget):
     reprocess_clicked = pyqtSignal()
     class_changed = pyqtSignal(int)
 
+    # NEW: image adjustment signals
+    brightness_changed = pyqtSignal(int)
+    contrast_changed   = pyqtSignal(int)
+    saturation_changed = pyqtSignal(int)
+    reset_image_adjustments = pyqtSignal()
+
     def __init__(self, config: dict):
         super().__init__()
         # Ensure config is always a dict to avoid NoneAttribute surprises
@@ -184,7 +190,7 @@ class ControlPanel(QWidget):
         tiling_group = QGroupBox("Tiling")
         tiling_layout = QVBoxLayout()
         self.tile_size_combo = QComboBox()
-        self.tile_size_combo.addItems(["512", "640", "768", "1024"])
+        self.tile_size_combo.addItems(["512", "640", "768", "1024", "1280", "1536", "2024"])
         self.tile_size_combo.setCurrentText(str(self.config.get('tiling', {}).get('base_tile_size', 640)))
         self.tile_size_combo.currentTextChanged.connect(lambda t: self.tile_size_changed.emit(int(t)))
         tiling_layout.addWidget(QLabel("Tile Size:"))
@@ -212,6 +218,65 @@ class ControlPanel(QWidget):
 
         display_group.setLayout(display_layout)
         layout.addWidget(display_group)
+
+        # NEW: Image Adjustments (session-only)
+        adj_group = QGroupBox("Image Adjustments")
+        adj_layout = QVBoxLayout()
+
+        def _make_slider_row(title: str, tooltip: str, changed_cb):
+            row = QHBoxLayout()
+            lbl = QLabel(title)
+            lbl.setToolTip(tooltip)
+            sld = QSlider(Qt.Orientation.Horizontal)
+            sld.setRange(-100, 100)
+            sld.setTickInterval(10)
+            sld.setSingleStep(1)
+            sld.setValue(0)
+            sld.setToolTip(tooltip)
+            val = QLabel("0")
+            val.setMinimumWidth(32)
+            sld.valueChanged.connect(lambda v: (val.setText(str(v)), changed_cb(int(v))))
+            row.addWidget(lbl)
+            row.addWidget(sld, 1)
+            row.addWidget(val)
+            return row, sld, val
+
+        # Brightness
+        br_row, self.brightness_slider, self.brightness_value_label = _make_slider_row(
+            "Brightness",
+            "Add/subtract luminance (β). Range: -100 … +100. Session-only.",
+            lambda v: self.brightness_changed.emit(v)
+        )
+        adj_layout.addLayout(br_row)
+
+        # Contrast
+        ct_row, self.contrast_slider, self.contrast_value_label = _make_slider_row(
+            "Contrast",
+            "Scale pixel contrast (α = 1 + v/100). Range: -100 … +100. Session-only.",
+            lambda v: self.contrast_changed.emit(v)
+        )
+        adj_layout.addLayout(ct_row)
+
+        # Saturation
+        st_row, self.saturation_slider, self.saturation_value_label = _make_slider_row(
+            "Saturation",
+            "Multiply HSV saturation (S *= 1 + v/100). Range: -100 … +100. Session-only.",
+            lambda v: self.saturation_changed.emit(v)
+        )
+        adj_layout.addLayout(st_row)
+
+        # Reset button
+        reset_btn = QPushButton("Reset Adjustments")
+        reset_btn.setToolTip("Reset brightness/contrast/saturation to 0 (session-only).")
+        def _reset():
+            self.brightness_slider.setValue(0)
+            self.contrast_slider.setValue(0)
+            self.saturation_slider.setValue(0)
+            self.reset_image_adjustments.emit()
+        reset_btn.clicked.connect(_reset)
+        adj_layout.addWidget(reset_btn)
+        adj_group.setLayout(adj_layout)
+        layout.addWidget(adj_group)
 
         # Export
         export_group = QGroupBox("Export")

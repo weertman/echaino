@@ -1,5 +1,5 @@
 # FILE: ui\main_window.py
-# PATH: D:\urchinScanner\ui\main_window.py
+# PATH: D:\\echaino\\ui\main_window.py
 
 import sys
 import yaml
@@ -265,12 +265,14 @@ class MainWindow(QMainWindow):
             },
             'yolo': {
                 'model': 'yolov8n.pt',
+                'pretrained_model': 'yolov8n.pt',
                 'imgsz': 640,
                 'conf': 0.25,
                 'iou': 0.45,
                 'device': 'auto',
                 'sahi_batch_size': 4,
                 'models_dir': './models',
+                'dataset_output_dir': './datasets',
                 'train_epochs': 50,
                 'batch_size': 16,
                 'img_size': 640,
@@ -288,8 +290,10 @@ class MainWindow(QMainWindow):
             },
             'tiling': {
                 'base_tile_size': 640,
-                # IMPORTANT: everyone else expects overlap_ratio, not "overlap"
                 'overlap_ratio': 0.2,
+                # NEW: center-accept + halo (opt-in, low churn)
+                'center_accept': True,              # enable the filtering
+                'center_accept_halo_px': 96         # shrink accept window by this many px on each edge
             },
             'sahi': {
                 'slice_size': 640,
@@ -525,6 +529,12 @@ class MainWindow(QMainWindow):
         self.control_panel.show_grid_check.toggled.connect(
             lambda checked: setattr(self.canvas, 'show_grid', checked) or self.canvas.update()
         )
+
+        # === NEW: Wire image adjustments (session-only) ===
+        self.control_panel.brightness_changed.connect(self.canvas.set_brightness)
+        self.control_panel.contrast_changed.connect(self.canvas.set_contrast)
+        self.control_panel.saturation_changed.connect(self.canvas.set_saturation)
+        self.control_panel.reset_image_adjustments.connect(self.canvas.reset_image_adjustments)
 
         # NEW: Edit mode and reprocess
         self.control_panel.edit_mode_toggled.connect(self._set_edit_mode)
@@ -1259,7 +1269,11 @@ class MainWindow(QMainWindow):
         if self.mode_lock.tryLock():  # Prevent concurrent changes
             self.current_mode = 'edit' if enabled else 'normal'
             self.canvas.set_edit_mode(enabled)
-            # Disable other modes (e.g., canvas.set_roi_mode(False))
+            if enabled:
+                try:
+                    self.canvas.setFocus(Qt.FocusReason.ShortcutFocusReason)
+                except Exception:
+                    self.canvas.setFocus()
             self.mode_lock.unlock()
 
     def _handle_box_edited(self, box_id: int, x1: float, y1: float, x2: float, y2: float):

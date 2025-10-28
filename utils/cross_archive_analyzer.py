@@ -1,5 +1,5 @@
 # FILE: utils/cross_archive_analyzer.py
-# PATH: D:\urchinScanner\utils\cross_archive_analyzer.py
+# PATH: D:\\echaino\\utils\cross_archive_analyzer.py
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -33,7 +33,9 @@ class CrossArchiveAnalyzer:
         self.um_metrics_map = {
             'area': 'area_um2',
             'perimeter': 'perimeter_um',
-            'diameter': 'diameter_um'
+            #'diameter': 'diameter_um',  # legacy key still supported
+            'diameter_best_fit': 'diameter_best_fit_um',
+            'diameter_feret_max': 'diameter_feret_max_um'
         }
 
         # Filter to relevant columns
@@ -57,12 +59,11 @@ class CrossArchiveAnalyzer:
             original_count = len(self.merged_df)
 
             # Remove extreme outliers using the same function from visualization_utils
-            columns_to_check = [col for col in ['diameter_um'] if col in self.merged_df.columns]
+            columns_to_check = [col for col in ['diameter_best_fit_um', 'diameter_feret_max_um']
+                                if col in self.merged_df.columns]
             if columns_to_check:
                 logger.info(f"Applying outlier removal to {columns_to_check}")
                 self.merged_df = remove_extreme_outliers(self.merged_df, columns_to_check, multiplier=3.0)
-                self.outliers_removed = original_count - len(self.merged_df)
-                logger.info(f"Removed {self.outliers_removed} extreme outliers from {original_count} total records")
 
         # Set enhanced visual style
         sns.set_theme(style="whitegrid", palette="husl", font_scale=1.1)
