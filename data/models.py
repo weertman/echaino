@@ -1,5 +1,5 @@
 # FILE: data\models.py
-# PATH: D:\urchinScanner\data\models.py
+# PATH: D:\\echaino\\data\models.py
 
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass, field
@@ -43,8 +43,10 @@ class Segmentation:
     perimeter_cm: Optional[float] = None
     source: Optional[str] = 'manual'  # New field: matches box source for consistency
     class_id: int = 0  # NEW: Multi-class support, default 0
-    class_name: Optional[str] = None  # NEW: Human-readable name (from config['classes'])
-    diameter_um: Optional[float] = None  # NEW: Diameter of best-fit circle in micrometers
+    class_name: Optional[str] = None  # Human-readable name (from config['classes'])
+    diameter_um: Optional[float] = None  # legacy alias: Diameter of best-fit circle in micrometers
+    diameter_best_fit_um: Optional[float] = None
+    diameter_feret_max_um: Optional[float] = None
 
     # Add a helper method similar to BoundingBox
     def set_source(self, source: str):
