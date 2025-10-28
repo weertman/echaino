@@ -1,5 +1,5 @@
 # FILE: core\annotation_manager.py
-# PATH: D:\urchinScanner\core\annotation_manager.py
+# PATH: D:\\echaino\\core\annotation_manager.py
 
 import numpy as np
 from typing import List, Optional, Callable, Tuple
@@ -246,6 +246,11 @@ class AnnotationManager:
             logger.info(f"  Debug mode: {self.debug_mode}")
             logger.info(f"  Using surgical approach: box → best mask")
             logger.info(f"  Merge partials: {self.enable_merge_partials}")
+
+            # log center-accept + halo (if configured)
+            center_accept = self.config.get('tiling', {}).get('center_accept', False)
+            accept_halo_px = int(self.config.get('tiling', {}).get('center_accept_halo_px', 0))
+            logger.info(f"  Center-accept enabled: {center_accept} (halo={accept_halo_px}px)")
 
             # Clear previous debug data
             self.debug_tile_images.clear()
@@ -616,9 +621,15 @@ class AnnotationManager:
     def _process_tiles_with_debug(self, image: np.ndarray, tiles: List[Tile],
                                   coordinate_mapper: CoordinateMapper,
                                   progress_callback: Optional[Callable] = None) -> List[Segmentation]:
-        """Process tiles and store debug information"""
+        """Process tiles and store debug information (with optional center-accept + halo)."""
         all_segmentations = []
         total_tiles = len(tiles)
+
+        # NEW: read center-accept config once
+        center_accept = bool(self.config.get('tiling', {}).get('center_accept', False))
+        accept_halo_px = int(self.config.get('tiling', {}).get('center_accept_halo_px', 0))
+        if accept_halo_px < 0:
+            accept_halo_px = 0  # sanity
 
         for i, tile in enumerate(tiles):
             if progress_callback:
@@ -629,27 +640,53 @@ class AnnotationManager:
             x1, x2 = tile.x, min(tile.x + tile.width, image.shape[1])
             tile_image = image[y1:y2, x1:x2].copy()
 
-            # Convert boxes to tile coordinates
+            # Convert boxes to tile coordinates (with center-accept + halo gate)
             tile_boxes = []
             box_ids = []
-            for box in tile.boxes:
-                # Clip box to tile boundaries
-                clipped_box = tile.clip_box(box)
-                if clipped_box:
-                    # Convert to tile-relative coordinates
-                    tile_box = BoundingBox(
-                        box.id,
-                        clipped_box.x1 - tile.x,
-                        clipped_box.y1 - tile.y,
-                        clipped_box.x2 - tile.x,  # FIXED: Remove duplicate - tile.x
-                        clipped_box.y2 - tile.y
-                    )
-                    tile_boxes.append(tile_box)
-                    box_ids.append(box.id)
 
-            # Process tile
+            # Stats for debug logging
+            _accepted = 0
+            _skipped_center = 0
+            _skipped_clip = 0
+
+            # Precompute accept-region bounds; guard against over-large halo
+            acc_x1 = tile.x + accept_halo_px
+            acc_y1 = tile.y + accept_halo_px
+            acc_x2 = tile.x + tile.width - accept_halo_px
+            acc_y2 = tile.y + tile.height - accept_halo_px
+            # If halo collapses the region, fallback to full tile bounds
+            if acc_x1 >= acc_x2 or acc_y1 >= acc_y2:
+                acc_x1, acc_y1, acc_x2, acc_y2 = tile.x, tile.y, tile.x + tile.width, tile.y + tile.height
+
+            for box in tile.boxes:
+                # --- NEW: center-accept filter (global coords)
+                if center_accept:
+                    cx = (box.x1 + box.x2) * 0.5
+                    cy = (box.y1 + box.y2) * 0.5
+                    if not (acc_x1 <= cx < acc_x2 and acc_y1 <= cy < acc_y2):
+                        _skipped_center += 1
+                        continue  # let the true center tile own this box
+
+                # Clip box to tile boundaries (unchanged)
+                clipped_box = tile.clip_box(box)
+                if not clipped_box:
+                    _skipped_clip += 1
+                    continue
+
+                # Convert to tile-relative coords (unchanged)
+                tile_box = BoundingBox(
+                    box.id,
+                    clipped_box.x1 - tile.x,
+                    clipped_box.y1 - tile.y,
+                    clipped_box.x2 - tile.x,
+                    clipped_box.y2 - tile.y
+                )
+                tile_boxes.append(tile_box)
+                box_ids.append(box.id)
+                _accepted += 1
+
+            # Process tile with SAM as before
             try:
-                # Process and get raw results
                 tile_results = self.sam_processor.process_tile(
                     tile_image, tile_boxes, box_ids, tile
                 )
@@ -658,28 +695,27 @@ class AnnotationManager:
                 if self.debug_mode:
                     self.debug_tile_results[tile.id] = tile_results
 
-                # Log tile processing summary
-                logger.info(f"Tile {tile.id} results:")
+                # Log tile processing summary (now with accept stats)
+                logger.info(
+                    f"Tile {tile.id} results: accepted={_accepted}, skipped_center={_skipped_center}, skipped_clip={_skipped_clip}")
                 for result in tile_results:
                     if result['mask'] is not None:
                         logger.info(f"  Box {result['box_id']}: Success (score={result['score']:.3f})")
                     else:
                         logger.info(f"  Box {result['box_id']}: Failed (no mask)")
 
-                # Convert results to full segmentations
+                # Convert results to full segmentations (unchanged)
                 for result in tile_results:
                     if result.get('mask') is None:
                         logger.debug(f"Skipping result for box {result['box_id']} - no mask")
-                        # Added: Mark box as failed
+                        # Mark box as failed
                         box = next((b for b in self.all_boxes if b.id == result['box_id']), None)
                         if box:
                             box.status = "processed_failed"
                         continue
 
-                    # Create full image mask
                     full_mask = coordinate_mapper.mask_tile_to_image(result['mask'], tile)
 
-                    # Extract polygon
                     polygon = mask_to_polygon(full_mask)
                     if not polygon:
                         logger.warning(f"Could not extract polygon for box {result['box_id']}")
@@ -688,11 +724,10 @@ class AnnotationManager:
                             box.status = "processed_failed"
                         continue
 
-                    # Calculate properties
                     bbox = calculate_bbox(full_mask)
                     area = calculate_area(full_mask)
 
-                    # NEW: Get box for class_id
+                    # Attach class info from original box
                     box = next((b for b in self.all_boxes if b.id == result['box_id']), None)
                     class_id = box.class_id if box else 0
                     class_name = self.classes[class_id] if self.classes and class_id < len(self.classes) else None
@@ -700,21 +735,21 @@ class AnnotationManager:
                     segmentation = Segmentation(
                         id=len(all_segmentations),
                         box_id=result['box_id'],
-                        mask=full_mask,  # Temporary; will discard later if not keeping
+                        mask=full_mask,  # Temp; may be discarded below
                         polygon=polygon,
                         bbox=bbox,
                         area_pixels=area,
                         confidence=result['score'],
-                        class_id=class_id,  # NEW
-                        class_name=class_name  # NEW
+                        class_id=class_id,
+                        class_name=class_name
                     )
 
-                    # Compute measurements immediately (uses mask)
+                    # Measurements now (uses mask)
                     segmentation = self.measurement_engine.calculate_measurements(segmentation)
 
-                    # Discard mask immediately unless configured to keep (but keep temp for merge later)
+                    # Discard mask unless configured to keep
                     if not self.config.get('processing', {}).get('keep_full_masks', False):
-                        segmentation.mask = None  # Discard now; merge will handle temp if needed
+                        segmentation.mask = None
 
                     all_segmentations.append(segmentation)
 

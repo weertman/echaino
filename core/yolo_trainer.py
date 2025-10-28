@@ -1,5 +1,5 @@
 # FILE: core\yolo_trainer.py
-# PATH: D:\urchinScanner\core\yolo_trainer.py
+# PATH: D:\\echaino\\core\yolo_trainer.py
 
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -18,7 +18,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class YoloTrainer:
     """Handles YOLO dataset preparation and training from archives"""
 
@@ -33,7 +32,7 @@ class YoloTrainer:
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # Unique timestamp
 
-        dataset_root = Path(self.config['yolo']['dataset_output_dir'])
+        dataset_root = Path(self.config.get('yolo', {}).get('dataset_output_dir', './datasets'))
         dataset_root.mkdir(parents=True, exist_ok=True)
 
         num_archives = len(selected_archives)
@@ -140,9 +139,12 @@ class YoloTrainer:
         """Train YOLO model on prepared dataset"""
         from ultralytics import YOLO
 
-        model = YOLO(self.config['yolo']['pretrained_model'])
+        pretrained = self.config.get('yolo', {}).get(
+            'pretrained_model',
+            self.config.get('yolo', {}).get('model', 'yolov8n.pt'))
+        model = YOLO(pretrained)
 
-        project_dir = Path(self.config['yolo']['models_dir']) / f"echaino_model_{timestamp}"  # Unique name
+        project_dir = Path(self.config.get('yolo', {}).get('models_dir', './models')) / f"echaino_model_{timestamp}"  # Unique name
 
         results = model.train(
             data=str(dataset_path / 'data.yaml'),

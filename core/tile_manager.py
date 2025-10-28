@@ -1,5 +1,5 @@
 # FILE: core\tile_manager.py
-# PATH: D:\urchinScanner\core\tile_manager.py
+# PATH: D:\\echaino\\core\tile_manager.py
 
 import numpy as np
 from typing import List, Tuple, Dict, Optional, Union

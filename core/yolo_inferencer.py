@@ -1,5 +1,5 @@
 # FILE: core\yolo_inferencer.py
-# PATH: D:\urchinScanner\core\yolo_inferencer.py
+# PATH: D:\\echaino\\core\yolo_inferencer.py
 
 from ultralytics import YOLO
 import numpy as np
